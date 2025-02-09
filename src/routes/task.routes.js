@@ -5,10 +5,11 @@ import { createPersonalTask, deletePersonalTask, listPersonalTasks, updatePerson
 const taskRouter = express.Router();
 
 // Personal Task Routes
-taskRouter.post("/task", auth, createPersonalTask);
-taskRouter.put("/task/:taskId/status", auth, updatePersonalTaskStatus);
-taskRouter.patch("/task/:taskId", auth, updatePersonalTask);
-taskRouter.delete("/task/:taskId", auth, deletePersonalTask);
-taskRouter.get("/", auth, listPersonalTasks);
+taskRouter.use(auth);
+taskRouter.post("/task", createPersonalTask);
+taskRouter.put("/task/:taskId/status", updatePersonalTaskStatus);
+taskRouter.patch("/task/:taskId", updatePersonalTask);
+taskRouter.delete("/task/:taskId", deletePersonalTask);
+taskRouter.get("/", listPersonalTasks);
 
 export default taskRouter;
