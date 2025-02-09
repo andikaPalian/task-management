@@ -44,6 +44,21 @@ const teamTaskSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    members: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true
+    }],
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true
+    },
+    maxMembers: {
+        type: Number,
+        default: 10,
+        required: true
+    },
     content: [taskContentSchema]
 }, {
     timestamps: true
