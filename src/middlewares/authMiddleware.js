@@ -4,39 +4,33 @@ import User from "../models/user.models.js";
 const auth = async (req, res, next) => {
     try {
         let token;
-        const authHeader = req.headers.authorization || req.headers.Authorization;
+        const authHeader = req.headers.Authorization || req.headers.authorization;
         if (authHeader && authHeader.startsWith("Bearer")) {
             token = authHeader.split(" ")[1];
             jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
                 if (err) {
-                    return res.status(403).json({
-                        message: "User is not authorized"
-                    });
+                    return res.status(403).json({message: "User is not authorized"});
                 }
+
                 const user = await User.findById(decoded.user?.id || decoded.id);
                 if (!user) {
-                    return res.status(404).json({
-                        message: "User not found"
-                    });
+                    return res.status(404).json({message: "User not found"});
                 }
-
                 req.user = {
                     userId: user._id,
-                    email: user.email,
-                }
-
+                    name: user.name,
+                    email: user.email
+                };
                 next();
             });
         } else {
-            return res.status(403).json({
-                message: "Token is missing or not provided"
-            });
+            return res.status(403).json({message: "Token is missing or not provided"});
         }
     } catch (error) {
-        console.error("Error during authentication:", error);
+        console.error("Error during auth middleware:", error);
         return res.status(500).json({
             message: "Internal server error",
-            error: error.message || "An unexpected error occurred"
+            error: error.message || "An unexpected error occurred",
         });
     }
 }

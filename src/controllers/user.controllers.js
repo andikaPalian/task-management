@@ -92,7 +92,7 @@ const loginUser = async (req, res) => {
         const isMatch = await bcrypt.compare(password, user.password);
         if (isMatch) {
             const token = jwt.sign({
-                _id: user._id
+                id: user._id
             }, process.env.JWT_SECRET, {expiresIn: "1d"});
             user.password = undefined;
             return res.status(200).json({
