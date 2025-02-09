@@ -2,6 +2,8 @@ import User from "../models/user.models.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import validator from "validator";
+import PersonalTask from "../models/personalTask.models.js";
+import TeamTask from "../models/teamTask.models.js";
 
 const registerUser = async (req, res) => {
     try {
@@ -114,4 +116,207 @@ const loginUser = async (req, res) => {
     }
 }
 
-export {registerUser, loginUser};
+const userDashboard = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const {type, status, page = 1, limit = 10} = req.query;
+        const query = {user: userId};
+
+        const pageNum = Number(page);
+        const limitNum = Number(limit);
+        const skip = (pageNum - 1) * limitNum;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const userResponse = user.toObject();
+        delete userResponse.password;
+
+        const validTaskTypes = ["personal", "team"];
+        if (type && !validTaskTypes.includes(type)) {
+            return res.status(400).json({
+                message: "Invalid task type"
+            });
+        }
+
+        const validTaskStatus = ["Not Started", "In Progress", "Completed"];
+        if (status && !validTaskStatus.includes(status)) {
+            return res.status(400).json({
+                message: "Invalid task status"
+            });
+        }
+
+        if (type === "personal") {
+            let queryPersonal = {createdBy: userId};
+            if (status) {
+                queryPersonal.status = status;
+            }
+
+            const totalPersonalTasks = await PersonalTask.countDocuments(queryPersonal);
+
+            const personalTasks = await PersonalTask.find(queryPersonal).skip(skip).limit(limitNum);
+
+            // Statistik keseluruhan personal task 
+            const completedCount = await PersonalTask.countDocuments({
+                createdBy: userId,
+                status: "Completed"
+            });
+
+            const inProgressCount = await PersonalTask.countDocuments({
+                createdBy: userId,
+                status: "In Progress"
+            });
+
+            const notStartedCount = await PersonalTask.countDocuments({
+                createdBy: userId,
+                status: "Not Started"
+            });
+
+            return res.status(200).json({
+                message: "Personal tasks retrieved successfully",
+                data: {
+                    total: totalPersonalTasks,
+                    personalTasks,
+                    stats: {
+                        completed: completedCount,
+                        inProgress: inProgressCount,
+                        notStarted: notStartedCount
+                    }
+                }
+            });
+        } else if (type === "team") {
+            const matchStage = {"content.assigned_to": userId};
+
+            if (status) {
+                matchStage["content.status"] = status;
+            }
+
+            const teamAggregation = await TeamTask.aggregate([
+                {$match: {"content.assigned_to": userId}},
+                {$unwind: "$content"},
+                // Jika status difilter, maka tambahkan tahap match kedua
+                {$match: status ? {"content.status": status} : {}},
+                {$group: {_id: null, count: {$sum: 1}}},
+            ]);
+
+            const totalTeamTasks = teamAggregation.length > 0 ? teamAggregation[0].count : 0;
+
+            // Mengambil data team tasks:
+            // Karena team tasks menyimpan beberapa task di dalam array, "content"
+            // Kita ambil semua team task yang memiliki assigned_to yang sesuai dengan userId lalu filter kontennya
+            let teamTasksData = await TeamTask.find({"content.assigned_to": userId});
+            teamTasksData = teamTasksData.map((teamTask) => {
+                const filteredContent = teamTask.content.filter((task) => 
+                task.assigned_to.toString() === userId && (status ? task.status === status : true));
+                return {...teamTask.toObject(), content: filteredContent};
+            });
+
+            // Hanya mengambil team task yang yang memiliki setidaknya 1 task (setelah di filter)
+            teamTasksData = teamTasksData.filter((teamTask) => teamTask.content.length > 0);
+
+            // Terapkan pagination secara manual
+            const paginatedTeamTasks = teamTasksData.slice(skip, skip + limitNum);
+
+            // Menghitung statistik status untuk team tasks (keseluruhan, tanpa filter)
+            const teamStatusAggregation = await TeamTask.aggregate([
+                {$match: {"content.assigned_to": userId}},
+                {$unwind: "$content"},
+                {$group: {_id: "$content.status", count: {$sum: 1}}},
+            ]);
+
+            // Inisiasi statistik
+            let teamStats = {
+                "Completed": 0,
+                "In Progress": 0,
+                "Not Started": 0,
+            };
+            teamStatusAggregation.forEach((item) => {
+                teamStats[item._id] = item.count;
+            });
+
+            return res.status(200).json({
+                message: "Team tasks retrieved successfully",
+                data: {
+                    total: totalTeamTasks,
+                    teamTasks: paginatedTeamTasks,
+                    stats: teamStats
+                }
+            });
+        }
+
+        // Jika tidak ada query type, maka total keseluruhan tasks dari personal dan team tasks
+        // Menghitung total personal tasks
+        const totalPersonal = await PersonalTask.countDocuments({createdBy: userId});
+
+        // Menghitung total team tasks melalui aggregate (jumlah total task dari semua content)
+        const teamAggregate = await TeamTask.aggregate([
+            {$match: {"content.assigned_to": userId}},
+            {$unwind: "$content"},
+            {$group: {_id: null, count: {$sum: 1}}},
+        ]);
+        const totalTeam = teamAggregate.length > 0 ? teamAggregate[0].count : 0;
+
+        const totalTasks = totalPersonal + totalTeam;
+
+        // Statistik untuk personal tasks
+        const personalStats = {
+            completed: await PersonalTask.countDocuments({
+                createdBy: userId,
+                status: "Completed"
+            }),
+            inProgress: await PersonalTask.countDocuments({
+                createdBy: userId,
+                status: "In Progress"
+            }),
+            notStarted: await PersonalTask.countDocuments({
+                createdBy: userId,
+                status: "Not Started"
+            })
+        };
+
+        // Statistik untuk team stats
+        const teamStatsAggregate = await TeamTask.aggregate([
+            {$match: {"content.assigned_to": userId}},
+            {$unwind: "$content"},
+            {$group: {_id: "$content.status", count: {$sum: 1}}},
+        ]);
+        let teamStats = {
+            "Completed": 0,
+            "In Progress": 0,
+            "Not Started": 0,
+        };
+        teamStatsAggregate.forEach((item) => {
+            teamStats[item._id] = item.count;
+        });
+
+        res.status(200).json({
+            message: "User dashboard retrieved successfully",
+            data: {
+                user: userResponse,
+                tasks: {
+                    total: totalTasks,
+                    personal: {
+                        total: totalPersonal,
+                        stats: personalStats
+                    },
+                    team: {
+                        total: totalTeam,
+                        stats: teamStats
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        console.error("Error retrieving user dashboard:", error);
+        return res.status(500).json({
+            message: "Internal Server Error",
+            error: error.message || "An error occurred while retrieving user dashboard"
+        });
+    }
+}
+
+export {registerUser, loginUser, userDashboard};
