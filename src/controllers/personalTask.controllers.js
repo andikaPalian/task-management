@@ -1,5 +1,4 @@
 import PersonalTask from "../models/personalTask.models.js";
-import TeamTask from "../models/teamTask.models.js";
 import User from "../models/user.models.js";
 import mongoose from "mongoose";
 
