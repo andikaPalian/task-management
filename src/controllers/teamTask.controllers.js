@@ -358,16 +358,16 @@ const addTaskToTeam = async (req, res) => {
             });
         }
 
-        const tasks = parsedContent.map(item => ({
-            createdBy: userId,
-            title: item.title,
-            description: item.description,
-            due_date: item.due_date,
-            priority: item.priority,
-            assigned_to: item.assigned_to
-        }));
-
-        team.content.push(...tasks);
+        parsedContent.forEach(item => {
+            team.content.push({
+                createdBy: userId,
+                title: item.title,
+                description: item.description,
+                due_date: item.due_date,
+                priority: item.priority,
+                assigned_to: item.assigned_to
+            })
+        })
         await team.save();
 
         res.status(200).json({
@@ -378,10 +378,12 @@ const addTaskToTeam = async (req, res) => {
                 maxMembers: team.maxMembers,
                 createdBy: team.createdBy,
                 content: team.content.map(task => ({
+                    id: task._id,
                     title: task.title,
                     description: task.description,
                     due_date: task.due_date,
                     priority: task.priority,
+                    status: task.status,
                     assigned_to: task.assigned_to
                 }))
             }
@@ -395,4 +397,290 @@ const addTaskToTeam = async (req, res) => {
     }
 }
 
-export {createTeam, addMemberToTeam, leaveTeam, editMaxMembers, deleteTeam, addTaskToTeam};
+const editContent = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const {teamId, taskId} = req.params;
+        const updateFields = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(taskId)) {
+            return res.status(400).json({
+                message: "Invalid task ID format"
+            });
+        }
+        
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const team = await TeamTask.findOne({
+            _id: teamId,
+            "content._id": taskId
+        });
+        if (!team) {
+            return res.status(404).json({
+                message: "Team not found"
+            });
+        }
+
+        if (!team.members.includes(userId)) {
+            return res.status(403).json({
+                message: "You are not a member of this team"
+            });
+        }
+
+        const content = team.content.find(task => task._id.toString() === taskId);
+        if (!content) {
+            return res.status(404).json({
+                message: "Task not found"
+            });
+        }
+
+        if (content.createdBy.toString() !== userId.toString()) {
+            return res.status(403).json({
+                message: "You are not authorized to edit this task. Only the creator of the task can edit it."
+            });
+        }
+
+        const updateObj = {};
+        for (const [key, value] of Object.entries(updateFields)) {
+            if (["title", "description", "due_date", "priority", "assigned_to"].includes(key)) {
+                updateObj[`content.$.${key}`] = value;
+            } else {
+                return res.status(400).json({
+                    message: "Invalid update field",
+                    error: "Only title, description, due_date, priority, and assigned_to fields are allowed"
+                });
+            }
+        }
+
+        const updateContent = await TeamTask.findOneAndUpdate(
+            {
+                _id: teamId,
+                "content._id": taskId
+            },
+            {
+                $set: updateObj
+            },
+            {
+                new: true
+            }
+        )
+
+    if (!updateContent) {
+        return res.status(404).json({
+            message: "Team or task not found during update"
+        });
+    }
+
+    res.status(200).json({
+        message: "Content updated successfully",
+        team: {
+            name: updateContent.name,
+            members: updateContent.members,
+            maxMembers: updateContent.maxMembers,
+            createdBy: updateContent.createdBy,
+            content: updateContent.content.map(task => ({
+                id: task._id,
+                title: task.title,
+                description: task.description,
+                due_date: task.due_date,
+                priority: task.priority,
+                status: task.status,
+                assigned_to: task.assigned_to
+            }))
+        }
+    });
+    } catch (error) {
+        console.error("Error during editing content:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message || "An unexpected error occurred"
+        });
+    }
+}
+
+const editTaskStatus = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const {teamId, taskId} = req.params;
+        const {status} = req.body;
+
+        if (!mongoose.Types.ObjectId.isValid(taskId)) {
+            return res.status(400).json({
+                message: "Invalid task ID format"
+            });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const validStatus = ["Not Started", "In Progress", "Completed"];
+        if (!validStatus.includes(status)) {
+            return res.status(400).json({
+                message: "Invalid status",
+                error: "Status must be one of: Not Started, In Progress, Completed"
+            });
+        }
+
+        const team = await TeamTask.findOne({
+            _id: teamId,
+            "content._id": taskId
+        });
+        if (!team) {
+            return res.status(404).json({
+                message: "Team not found"
+            });
+        }
+
+        if (!team.members.some(memberId => memberId.toString() === userId.toString())) {
+            return res.status(403).json({
+                message: "You are not a member of this team"
+            });
+        }
+
+        const content = team.content.find(task => task._id.toString() === taskId);
+        if (!content) {
+            return res.status(404).json({
+                message: "Task not found"
+            });
+        }
+        if (content.assigned_to.some(assignedId => assignedId.toString() === userId.toString())) {
+            return res.status(403).json({
+                message: "You are not authorized to edit this task status. Only the assigned user can edit it."
+            });
+        }
+
+        if (content.status === status) {
+            return res.status(200).json({
+                message: "Task status is already set to the provided status"
+            });
+        }
+
+        const updateStatus = await TeamTask.findOneAndUpdate(
+            {
+                _id: teamId,
+                "content._id": taskId
+            },
+            {
+                $set: {
+                    "content.$.status": status
+                }
+            },
+            {
+                new: true
+            }
+        ).populate("content.assigned_to", "name email");
+        if (!updateStatus) {
+            return res.status(404).json({
+                message: "Team or task not found during status update"
+            });
+        }
+
+        // Format response
+        // const updatedTask = updateStatus.content.find(task => task._id.toString() === taskId);
+
+        res.status(200).json({
+            message: "Task status updated successfully",
+            task: updateStatus.content.map(task => ({
+                id: task._id,
+                title: task.title,
+                description: task.description,
+                due_date: task.due_date,
+                priority: task.priority,
+                status: task.status,
+                assigned_to: task.assigned_to
+            }))
+        });
+    } catch (error) {
+        console.error("Error during editing task status:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message || "An unexpected error occurred"
+        });
+    }
+}
+
+const deleteTaskContent = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const {teamId, taskId} = req.params;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const team = await TeamTask.findOne({
+            _id: teamId,
+            "content._id": taskId
+        });
+        if (!team) {
+            return res.status(404).json({
+                message: "Team not found"
+            });
+        }
+
+        if (!team.members.some(memberId => memberId.toString() === userId.toString())) {
+            return res.status(403).json({
+                message: "You are not a member of this team"
+            });
+        }
+
+        const content = team.content.find(task => task._id.toString() === taskId);
+        if (!content) {
+            return res.status(404).json({
+                message: "Task not found"
+            });
+        }
+
+        if (content.createdBy.toString() !== userId.toString()) {
+            return res.status(403).json({
+                message: "You are not authorized to delete this task. Only the creator of the task can delete it."
+            });
+        }
+
+        const deleteContent = await TeamTask.findOneAndUpdate(
+            {
+                _id: teamId,
+                "content._id": taskId
+            },
+            {
+                $pull: {
+                    "content": {
+                        _id: taskId
+                    }
+                }
+            },
+            {
+                new: true
+            }
+        );
+        if (!deleteContent) {
+            return res.status(404).json({
+                message: "Team or task not found during deletion"
+            });
+        }
+
+        res.status(200).json({
+            message: "Task deleted successfully",
+        });
+    } catch (error) {
+        console.error("Error during deleting task:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message || "An unexpected error occurred"
+        });
+    }
+}
+
+export {createTeam, addMemberToTeam, leaveTeam, editMaxMembers, deleteTeam, addTaskToTeam, editContent, editTaskStatus, deleteTaskContent};
