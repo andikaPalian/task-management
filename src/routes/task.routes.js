@@ -7,7 +7,7 @@ const taskRouter = express.Router();
 // Personal Task Routes
 taskRouter.use(auth);
 taskRouter.post("/task", createPersonalTask);
-taskRouter.put("/task/:taskId/status", updatePersonalTaskStatus);
+taskRouter.patch("/task/:taskId/status", updatePersonalTaskStatus);
 taskRouter.patch("/task/:taskId", updatePersonalTask);
 taskRouter.delete("/task/:taskId", deletePersonalTask);
 taskRouter.get("/", listPersonalTasks);

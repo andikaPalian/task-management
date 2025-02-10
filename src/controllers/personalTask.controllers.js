@@ -1,6 +1,7 @@
 import PersonalTask from "../models/personalTask.models.js";
 import User from "../models/user.models.js";
 import mongoose from "mongoose";
+import validator from "validator";
 
 const createPersonalTask = async (req, res) => {
     try {
@@ -46,6 +47,7 @@ const createPersonalTask = async (req, res) => {
         }
 
         const newPersonalTask = new PersonalTask({
+            createdBy: user._id,
             title,
             description,
             due_date,
@@ -76,7 +78,7 @@ const createPersonalTask = async (req, res) => {
 const updatePersonalTaskStatus = async (req, res) => {
     try {
         const userId = req.user.userId;
-        const taskId = req.params;
+        const {taskId} = req.params;
         const {status} = req.body;
 
         const user = await User.findById(userId);
@@ -131,7 +133,7 @@ const updatePersonalTaskStatus = async (req, res) => {
 const updatePersonalTask = async (req, res) => {
     try {
         const userId = req.user.userId;
-        const taskId = req.params;
+        const {taskId} = req.params;
         const {title, description, due_date, priority} = req.body;
 
         const user = await User.findById(userId);
@@ -213,7 +215,7 @@ const updatePersonalTask = async (req, res) => {
 const deletePersonalTask = async (req, res) => {
     try {
         const userId = req.user.userId;
-        const taskId = req.params;
+        const {taskId} = req.params;
 
         const user = await User.findById(userId);
         if (!user) {
@@ -246,32 +248,27 @@ const listPersonalTasks = async (req, res) => {
     try {
         const userId = req.user.userId;
         const {status} = req.query;
-
+        const query ={createdBy: userId};
+        
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
                 message: "User not found"
             });
         }
-
-        const validStatus = ["Not Started", "In Progress", "Completed"];
-        if (!validStatus.includes(status)) {
-            return res.status(400).json({
-                message: "Invalid status value"
-            });
-        }
-
+        
         if (status) {
-            const personalTask = await PersonalTask.find({user: userId, status: status});
-            if (!personalTask) {
-                return res.status(404).json({
-                    message: "Personal task not found"
+            const validStatus = ["Not Started", "In Progress", "Completed"];
+            if (!validStatus.includes(status)) {
+                return res.status(400).json({
+                    message: "Invalid status value"
                 });
             }
+            query.status = status;
         }
 
-        const personalTask = await PersonalTask.find({user: userId});
-        if (!personalTask) {
+        const personalTask = await PersonalTask.find(query).populate("createdBy", "name");
+        if (personalTask.length === 0) {
             return res.status(404).json({
                 message: "Personal task not found"
             });
@@ -279,13 +276,15 @@ const listPersonalTasks = async (req, res) => {
 
         res.status(200).json({
             message: "Personal task listed successfully",
-            tasks: {
-                title: personalTask.title,
-                description: personalTask.description,
-                due_date: personalTask.due_date,
-                priority: personalTask.priority,
-                status: personalTask.status
-            }
+            tasks: personalTask.map(task => ({
+                id: task._id,
+                title: task.title,
+                description: task.description,
+                due_date: task.due_date,
+                priority: task.priority,
+                status: task.status,
+                createdBy: task.createdBy
+            }))
         });
     } catch (error) {
         console.error("Error during listing personal tasks:", error);
