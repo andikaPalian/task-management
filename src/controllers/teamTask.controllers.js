@@ -1,3 +1,4 @@
+import { parse } from "dotenv";
 import TeamTask from "../models/teamTask.models.js";
 import User from "../models/user.models.js";
 import mongoose from "mongoose";
@@ -290,4 +291,108 @@ const deleteTeam = async (req, res) => {
     }
 }
 
-export {createTeam, addMemberToTeam, leaveTeam, editMaxMembers, deleteTeam};
+const addTaskToTeam = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const {teamId} = req.params;
+        const {content} = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const team = await TeamTask.findById(teamId);
+        if (!team) {
+            return res.status(404).json({
+                message: "Team not found"
+            });
+        }
+
+        if (!team.members.includes(userId)) {
+            return res.status(403).json({
+                message: "You are not a member of this team"
+            });
+        }
+
+        let parsedContent;
+        try {
+            // Jika content bertipe String, lakukan parsing
+            if (typeof content === "string") {
+                parsedContent = JSON.parse(content);
+            } else if (Array.isArray(content)) {
+                // Jika content sudah berupa array, langsung gunakan
+                parsedContent = content;
+            } else {
+                // Jika content bukan string atau array, kembalikan error
+                return res.status(400).json({
+                    message: "Invalid content format",
+                    error: "Content should be a string or an array of objects"
+                });
+            }
+            
+            // parsedContent = JSON.parse(content);
+            if (!Array.isArray(parsedContent) || parsedContent.length === 0) {
+                return res.status(400).json({
+                    message: "Invalid content format",
+                    error: "Content should be a non-empty array of objects"
+                });
+            }
+
+            const validContent = parsedContent.every(item => 
+                item.title && item.description && item.due_date && item.priority && item.assigned_to
+            );
+            if (!validContent) {
+                return res.status(400).json({
+                    message: "Invalid content format",
+                    error: "Each item in the content array should have title, description, due_date, priority, and assigned_to properties"
+                });
+            }
+        } catch (error) {
+            console.error("Error during parsing content:", error);
+            return res.status(500).json({
+                message: "Internal server error",
+                error: error.message || "An unexpected error occurred"
+            });
+        }
+
+        const tasks = parsedContent.map(item => ({
+            createdBy: userId,
+            title: item.title,
+            description: item.description,
+            due_date: item.due_date,
+            priority: item.priority,
+            assigned_to: item.assigned_to
+        }));
+
+        team.content.push(...tasks);
+        await team.save();
+
+        res.status(200).json({
+            message: "Tasks added to team successfully",
+            team: {
+                name: team.name,
+                members: team.members,
+                maxMembers: team.maxMembers,
+                createdBy: team.createdBy,
+                content: team.content.map(task => ({
+                    title: task.title,
+                    description: task.description,
+                    due_date: task.due_date,
+                    priority: task.priority,
+                    assigned_to: task.assigned_to
+                }))
+            }
+        });
+    } catch (error) {
+        console.error("Error during adding task to team:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message || "An unexpected error occurred"
+        });
+    }
+}
+
+export {createTeam, addMemberToTeam, leaveTeam, editMaxMembers, deleteTeam, addTaskToTeam};
