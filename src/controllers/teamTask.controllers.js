@@ -155,7 +155,7 @@ const leaveTeam = async (req, res) => {
         }
 
         // Mencegah pembuat tim untuk meninggalkan tim mereka sendiri
-        if (team.createdBy.toString() === userId) {
+        if (team.createdBy.toString() === userId.toString()) {
             return res.status(400).json({
                 message: "You cannot leave your own team"
             });
@@ -214,9 +214,9 @@ const editMaxMembers = async (req, res) => {
             });
         }
 
-        if (!team.createdBy.equals(userId)) {
+        if (!team.createdBy.toString() !== userId.toString()) {
             return res.status(403).json({
-                message: "You are not authorized to edit this team"
+                message: "You are not authorized to edit this team. Only the team creator can edit the max members value."
             });
         }
 
@@ -272,9 +272,9 @@ const deleteTeam = async (req, res) => {
             });
         }
 
-        if (!team.createdBy.equals(userId)) {
+        if (!team.createdBy.toString() !== userId.toString()) {
             return res.status(403).json({
-                message: "You are not authorized to delete this team"
+                message: "You are not authorized to delete this team. Only the creator can delete the team."
             });
         }
 
@@ -311,7 +311,7 @@ const addTaskToTeam = async (req, res) => {
             });
         }
 
-        if (!team.members.includes(userId)) {
+        if (!team.members.some(memberId => memberId.toString() === userId.toString())) {
             return res.status(403).json({
                 message: "You are not a member of this team"
             });
@@ -426,7 +426,7 @@ const editContent = async (req, res) => {
             });
         }
 
-        if (!team.members.includes(userId)) {
+        if (!team.members.some(memberId => memberId.toString() === userId.toString())) {
             return res.status(403).json({
                 message: "You are not a member of this team"
             });
@@ -683,4 +683,60 @@ const deleteTaskContent = async (req, res) => {
     }
 }
 
-export {createTeam, addMemberToTeam, leaveTeam, editMaxMembers, deleteTeam, addTaskToTeam, editContent, editTaskStatus, deleteTaskContent};
+const listTeamTask = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const {teamId} = req.params;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const team = await TeamTask.findOne({
+            _id: teamId,
+            "members": userId
+        }).populate("content.assigned_to", "name email");
+        if (!team) {
+            return res.status(404).json({
+                message: "Team not found"
+            });
+        }
+
+        if (!team.members.some(memberId => memberId.toString() === userId.toString())) {
+            return res.status(403).json({
+                message: "You are not a member of this team"
+            });
+        }
+
+        res.status(200).json({
+            message: "Team task list",
+            team: {
+                _id: team._id,
+                name: team.name,
+                description: team.description,
+                members: team.members,
+                createdBy: team.createdBy,
+                content: team.content.map(task => ({
+                    id: task._id,
+                    title: task.title,
+                    description: task.description,
+                    due_date: task.due_date,
+                    priority: task.priority,
+                    status: task.status,
+                    assigned_to: task.assigned_to
+                }))
+            }
+        });
+    } catch (error) {
+        console.error("Error during listing team tasks:", error);
+        return res.status(500).json({
+            message: "Internal server error",
+            error: error.message || "An unexpected error occurred"
+        });
+    }
+}
+
+export {createTeam, addMemberToTeam, leaveTeam, editMaxMembers, deleteTeam, addTaskToTeam, editContent, editTaskStatus, deleteTaskContent, listTeamTask};
